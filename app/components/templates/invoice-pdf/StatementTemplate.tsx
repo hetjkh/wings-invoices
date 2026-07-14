@@ -289,7 +289,6 @@ const StatementTemplate = (data: StatementData) => {
                                     alt={`Signature of ${sender.name}`}
                                     className="border border-gray-300 rounded"
                                 />
-                                <p className="text-sm text-gray-600 mt-2 font-medium">{sender.name}</p>
                             </div>
                         )}
                     </div>

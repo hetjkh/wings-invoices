@@ -29,7 +29,6 @@ const PaymentInstructionsSection = ({ data }: PaymentInstructionsSectionProps) =
                 height={50}
                 alt={`Signature of ${sender.name}`}
             />
-            <p className="text-xs text-gray-600 mt-0.5">{sender.name}</p>
         </div>
     );
 
