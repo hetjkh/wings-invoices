@@ -88,7 +88,7 @@ const InvoiceTemplate = (data: InvoiceType) => {
 
   return (
     <InvoiceLayout data={data}>
-      <div className="border border-gray-300 p-6 rounded-xl space-y-6">
+      <div className="border border-gray-300 p-6 rounded-xl space-y-4">
         {/* Header */}
         <div className="flex flex-wrap justify-between items-start gap-6">
           <div className="max-w-xs space-y-2">
@@ -389,89 +389,91 @@ const InvoiceTemplate = (data: InvoiceType) => {
           </table>
         </div>
 
-        {/* Totals */}
-        <div className="grid md:grid-cols-2 gap-4 items-start">
-          <div className="space-y-3 text-sm text-gray-700">
-            {details.additionalNotes && (
-              <div>
-                <p className="uppercase text-xs font-semibold tracking-widest text-gray-500">
-                  Notes
-                </p>
-                <p className="whitespace-pre-line">{details.additionalNotes}</p>
+        {/* Totals + payment kept close together */}
+        <div className="space-y-3">
+          <div className="grid md:grid-cols-2 gap-4 items-start">
+            <div className="space-y-3 text-sm text-gray-700">
+              {details.additionalNotes && (
+                <div>
+                  <p className="uppercase text-xs font-semibold tracking-widest text-gray-500">
+                    Notes
+                  </p>
+                  <p className="whitespace-pre-line">{details.additionalNotes}</p>
+                </div>
+              )}
+              {details.paymentTerms && (
+                <div>
+                  <p className="uppercase text-xs font-semibold tracking-widest text-gray-500">
+                    Payment Terms
+                  </p>
+                  <p className="whitespace-pre-line">{details.paymentTerms}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="border border-gray-300 rounded-lg p-3 space-y-2 bg-gray-50">
+              <div className="flex justify-between text-sm text-gray-700">
+                <span className="font-semibold">Subtotal</span>
+                <span>
+                  {formatNumberWithCommas(Number(details.subTotal) || 0)}{" "}
+                  {details.currency}
+                </span>
               </div>
-            )}
-            {details.paymentTerms && (
-              <div>
-                <p className="uppercase text-xs font-semibold tracking-widest text-gray-500">
-                  Payment Terms
-                </p>
-                <p className="whitespace-pre-line">{details.paymentTerms}</p>
+              {details.discountDetails?.amount ? (
+                <div className="flex justify-between text-sm text-gray-700">
+                  <span className="font-semibold">Discount</span>
+                  <span>
+                    {details.discountDetails.amountType === "amount"
+                      ? `- ${formatNumberWithCommas(
+                          Number(details.discountDetails.amount) || 0
+                        )} ${details.currency}`
+                      : `- ${details.discountDetails.amount}%`}
+                  </span>
+                </div>
+              ) : null}
+              {details.taxDetails?.amount ? (
+                <div className="flex justify-between text-sm text-gray-700">
+                  <span className="font-semibold">Tax</span>
+                  <span>
+                    {details.taxDetails.amountType === "amount"
+                      ? `+ ${formatNumberWithCommas(
+                          Number(details.taxDetails.amount) || 0
+                        )} ${details.currency}`
+                      : `+ ${details.taxDetails.amount}%`}
+                  </span>
+                </div>
+              ) : null}
+              {details.shippingDetails?.cost ? (
+                <div className="flex justify-between text-sm text-gray-700">
+                  <span className="font-semibold">Service Fees</span>
+                  <span>
+                    {details.shippingDetails.costType === "amount"
+                      ? `+ ${formatNumberWithCommas(
+                          Number(details.shippingDetails.cost) || 0
+                        )} ${details.currency}`
+                      : `+ ${details.shippingDetails.cost}%`}
+                  </span>
+                </div>
+              ) : null}
+              <div className="border-t border-gray-300 pt-3 flex justify-between text-base font-semibold text-gray-900">
+                <span>Total</span>
+                <span>
+                  {formatNumberWithCommas(Number(details.totalAmount) || 0)}{" "}
+                  {details.currency}
+                </span>
               </div>
-            )}
+              {details.totalAmountInWords && (
+                <p className="text-xs text-gray-600 italic">
+                  Amount in words: {details.totalAmountInWords}{" "}
+                  {details.currency}
+                </p>
+              )}
+            </div>
           </div>
 
-          <div className="border border-gray-300 rounded-lg p-3 space-y-2 bg-gray-50">
-            <div className="flex justify-between text-sm text-gray-700">
-              <span className="font-semibold">Subtotal</span>
-              <span>
-                {formatNumberWithCommas(Number(details.subTotal) || 0)}{" "}
-                {details.currency}
-              </span>
-            </div>
-            {details.discountDetails?.amount ? (
-              <div className="flex justify-between text-sm text-gray-700">
-                <span className="font-semibold">Discount</span>
-                <span>
-                  {details.discountDetails.amountType === "amount"
-                    ? `- ${formatNumberWithCommas(
-                        Number(details.discountDetails.amount) || 0
-                      )} ${details.currency}`
-                    : `- ${details.discountDetails.amount}%`}
-                </span>
-              </div>
-            ) : null}
-            {details.taxDetails?.amount ? (
-              <div className="flex justify-between text-sm text-gray-700">
-                <span className="font-semibold">Tax</span>
-                <span>
-                  {details.taxDetails.amountType === "amount"
-                    ? `+ ${formatNumberWithCommas(
-                        Number(details.taxDetails.amount) || 0
-                      )} ${details.currency}`
-                    : `+ ${details.taxDetails.amount}%`}
-                </span>
-              </div>
-            ) : null}
-            {details.shippingDetails?.cost ? (
-              <div className="flex justify-between text-sm text-gray-700">
-                <span className="font-semibold">Service Fees</span>
-                <span>
-                  {details.shippingDetails.costType === "amount"
-                    ? `+ ${formatNumberWithCommas(
-                        Number(details.shippingDetails.cost) || 0
-                      )} ${details.currency}`
-                    : `+ ${details.shippingDetails.cost}%`}
-                </span>
-              </div>
-            ) : null}
-            <div className="border-t border-gray-300 pt-3 flex justify-between text-base font-semibold text-gray-900">
-              <span>Total</span>
-              <span>
-                {formatNumberWithCommas(Number(details.totalAmount) || 0)}{" "}
-                {details.currency}
-              </span>
-            </div>
-            {details.totalAmountInWords && (
-              <p className="text-xs text-gray-600 italic">
-                Amount in words: {details.totalAmountInWords}{" "}
-                {details.currency}
-              </p>
-            )}
-          </div>
+          {/* Payment instructions + Receiver signature section (toggled) */}
+          <PaymentInstructionsSection data={data} />
         </div>
-
-        {/* Payment instructions + Receiver signature section (toggled) */}
-        <PaymentInstructionsSection data={data} />
       </div>
     </InvoiceLayout>
   );

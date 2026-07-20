@@ -33,7 +33,7 @@ const PaymentInstructionsSection = ({ data }: PaymentInstructionsSectionProps) =
     );
 
     return (
-        <div className="mt-3">
+        <div>
             {/* Payment Instructions (if exists) */}
             {hasPaymentInfo && (
                 <div className="flex justify-between items-start gap-3 mb-3">
