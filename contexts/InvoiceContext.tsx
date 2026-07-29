@@ -43,11 +43,20 @@ import {
 } from "@/lib/brandAssets";
 
 // Helpers
-import { getNextInvoiceNumber } from "@/lib/helpers";
+import {
+  getNextInvoiceNumber,
+  parseInvoiceNumberValue,
+  peekNextInvoiceNumber,
+  syncLastInvoiceNumberFromList,
+  updateLastInvoiceNumber,
+} from "@/lib/helpers";
 import {
   buildInvoiceListQueryString,
   type InvoiceListFilterParams,
 } from "@/lib/invoiceListQuery";
+
+// Components
+import DuplicateInvoiceNumberAlert from "@/app/components/modals/alerts/DuplicateInvoiceNumberAlert";
 
 // Types
 import { ExportTypes, InvoiceType } from "@/types";
@@ -90,6 +99,7 @@ const defaultInvoiceContext = {
   sendPdfToMail: (email: string): Promise<void> => Promise.resolve(),
   exportInvoiceAs: (exportAs: ExportTypes) => {},
   importInvoice: async (file: File) => {},
+  markInvoiceAsEditing: (_invoiceNumber: string | null) => {},
 };
 
 export const InvoiceContext = createContext(defaultInvoiceContext);
@@ -141,6 +151,20 @@ export const InvoiceContextProvider = ({
     sort: "date-desc",
   });
 
+  // When loading an existing invoice for edit, remember its number so save can update it
+  const [editingInvoiceNumber, setEditingInvoiceNumber] = useState<string | null>(
+    null
+  );
+  const [duplicateDialog, setDuplicateDialog] = useState<{
+    open: boolean;
+    existingNumber: string;
+    suggestedNumber: string;
+  }>({
+    open: false,
+    existingNumber: "",
+    suggestedNumber: "",
+  });
+
   const applyInvoiceListResponse = useCallback(
     (data: {
       invoices?: InvoiceType[];
@@ -150,7 +174,13 @@ export const InvoiceContextProvider = ({
       stats?: InvoiceListStats;
     }, append: boolean) => {
       const list = withDefaultBrandAssetsList(data.invoices || []);
-      setSavedInvoices((prev) => (append ? [...prev, ...list] : list));
+      setSavedInvoices((prev) => {
+        const next = append ? [...prev, ...list] : list;
+        syncLastInvoiceNumberFromList(
+          next.map((invoice) => invoice.details?.invoiceNumber)
+        );
+        return next;
+      });
       setHasMoreInvoices(data.hasMore || false);
       setTotalInvoiceCount(data.totalCount || 0);
       setFilteredInvoiceCount(data.filteredCount ?? data.totalCount ?? 0);
@@ -160,6 +190,51 @@ export const InvoiceContextProvider = ({
     },
     []
   );
+
+  /**
+   * Syncs the invoice number counter from the server and fills the form
+   * with the next number when creating a new invoice (not editing / no draft number).
+   */
+  const syncNextInvoiceNumberFromServer = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const response = await fetch("/api/invoice/next-number", {
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+
+      const data = await response.json();
+      if (data.lastNumber) {
+        updateLastInvoiceNumber(data.lastNumber);
+      }
+
+      const currentNumber = getValues("details.invoiceNumber");
+      const isEditing =
+        editingInvoiceNumber !== null &&
+        currentNumber === editingInvoiceNumber;
+
+      // Only auto-fill when starting a new invoice (not editing an existing one)
+      if (!isEditing && data.nextNumber) {
+        const currentValue = parseInvoiceNumberValue(currentNumber);
+        const lastValue = parseInvoiceNumberValue(data.lastNumber);
+
+        const shouldReplace =
+          !currentNumber ||
+          currentNumber.trim() === "" ||
+          // Stale/overlapping number from localStorage (at or below last used)
+          (lastValue !== null &&
+            currentValue !== null &&
+            currentValue <= lastValue);
+
+        if (shouldReplace) {
+          setValue("details.invoiceNumber", data.nextNumber);
+        }
+      }
+    } catch (error) {
+      console.error("Error syncing next invoice number:", error);
+    }
+  }, [user, getValues, setValue, editingInvoiceNumber]);
 
   const fetchInvoiceListPage = useCallback(
     async (skip: number, append: boolean) => {
@@ -229,9 +304,27 @@ export const InvoiceContextProvider = ({
             const savedInvoicesDefault = savedInvoicesJSON
               ? JSON.parse(savedInvoicesJSON)
               : [];
-            setSavedInvoices(withDefaultBrandAssetsList(savedInvoicesDefault));
+            const branded = withDefaultBrandAssetsList(savedInvoicesDefault);
+            setSavedInvoices(branded);
+            syncLastInvoiceNumberFromList(
+              branded.map((invoice: InvoiceType) => invoice.details?.invoiceNumber)
+            );
             setHasMoreInvoices(false);
             setTotalInvoiceCount(savedInvoicesDefault.length);
+
+            // Ensure new invoice form shows next number after last guest invoice
+            const currentNumber = getValues("details.invoiceNumber");
+            if (
+              editingInvoiceNumber === null &&
+              (!currentNumber ||
+                currentNumber.trim() === "" ||
+                branded.some(
+                  (invoice: InvoiceType) =>
+                    invoice.details?.invoiceNumber === currentNumber
+                ))
+            ) {
+              setValue("details.invoiceNumber", peekNextInvoiceNumber());
+            }
           } catch (error) {
             console.error("Error parsing saved invoices from localStorage:", error);
             // Clear corrupted data
@@ -246,6 +339,14 @@ export const InvoiceContextProvider = ({
 
     loadInvoices();
   }, [user, fetchInvoiceListPage]);
+
+  // Sync next invoice number from DB once the user is available
+  useEffect(() => {
+    if (user && !searchParams?.get("invoiceId")) {
+      syncNextInvoiceNumberFromServer();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   // Function to load more invoices (same filters/search as current list)
   const loadMoreInvoices = async () => {
@@ -300,6 +401,7 @@ export const InvoiceContextProvider = ({
             
             // Reset form with invoice data
             reset(withDefaultBrandAssets(invoice));
+            setEditingInvoiceNumber(invoice.details?.invoiceNumber || null);
             
             // Remove query parameter from URL
             const url = new URL(window.location.href);
@@ -355,7 +457,7 @@ export const InvoiceContextProvider = ({
    * Generates a new invoice.
    */
   const newInvoice = () => {
-    // Get the next invoice number
+    // Get the next invoice number after the last saved invoice
     const nextInvoiceNumber = getNextInvoiceNumber();
     
     // Reset form with default values and set the new invoice number
@@ -369,6 +471,7 @@ export const InvoiceContextProvider = ({
     
     reset(defaultValuesWithInvoiceNumber);
     setInvoicePdf(new Blob());
+    setEditingInvoiceNumber(null);
 
     // Clear the draft
     if (typeof window !== "undefined") {
@@ -478,108 +581,195 @@ export const InvoiceContextProvider = ({
     }
   };
 
-  // TODO: Change function name. (saveInvoiceData maybe?)
   /**
-   * Saves the invoice data to database (if logged in) or local storage.
+   * Resolves whether an invoice number already exists and what the next free number is.
    */
-  const saveInvoice = async () => {
-    if (invoicePdf) {
-      // If get values function is provided, allow to save the invoice
-      if (getValues) {
-        const formValues = withDefaultBrandAssets(getValues());
-        const updatedDate = new Date().toLocaleDateString(
-          "en-US",
-          SHORT_DATE_OPTIONS
+  const resolveInvoiceNumberConflict = async (
+    invoiceNumber: string
+  ): Promise<{ exists: boolean; suggestedNumber: string }> => {
+    if (user) {
+      try {
+        const response = await fetch(
+          `/api/invoice/next-number?number=${encodeURIComponent(invoiceNumber)}`,
+          { cache: "no-store" }
         );
-        formValues.details.updatedAt = updatedDate;
-
-        if (user) {
-          // Save to database
-          try {
-            const response = await fetch("/api/invoice/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(formValues),
-            });
-
-            if (response.ok) {
-              const data = await response.json();
-              
-              // Check if invoice already existed
-              const existingInvoiceIndex = savedInvoices.findIndex(
-                (invoice: InvoiceType) => {
-                  return (
-                    invoice.details.invoiceNumber === formValues.details.invoiceNumber
-                  );
-                }
-              );
-
-              if (existingInvoiceIndex !== -1) {
-                // Update in local state
-                const updated = [...savedInvoices];
-                updated[existingInvoiceIndex] = formValues;
-                setSavedInvoices(updated);
-                modifiedInvoiceSuccess();
-              } else {
-                // Add to local state
-                setSavedInvoices([...savedInvoices, formValues]);
-                saveInvoiceSuccess();
-              }
-            } else {
-              const error = await response.json();
-              console.error("Save error:", error);
-              toast({
-                variant: "destructive",
-                title: "Save failed",
-                description: error.error || "Could not save invoice",
-              });
-            }
-          } catch (error) {
-            console.error("Save error:", error);
-            toast({
-              variant: "destructive",
-              title: "Error",
-              description: "Failed to save invoice. Please try again.",
-            });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.lastNumber) {
+            updateLastInvoiceNumber(data.lastNumber);
           }
-        } else {
-          // Save to localStorage
-          let savedInvoices: InvoiceType[] = [];
-          try {
-            const savedInvoicesJSON = localStorage.getItem("savedInvoices");
-            savedInvoices = savedInvoicesJSON
-              ? JSON.parse(savedInvoicesJSON)
-              : [];
-          } catch (error) {
-            console.error("Error parsing saved invoices from localStorage:", error);
-            // Clear corrupted data
-            localStorage.removeItem("savedInvoices");
-            savedInvoices = [];
-          }
+          return {
+            exists: !!data.exists,
+            suggestedNumber: data.nextNumber || peekNextInvoiceNumber(),
+          };
+        }
+      } catch (error) {
+        console.error("Error checking invoice number:", error);
+      }
+    }
 
+    // Guest / fallback: check local saved invoices
+    const exists = savedInvoices.some(
+      (invoice) => invoice.details?.invoiceNumber === invoiceNumber
+    );
+    syncLastInvoiceNumberFromList(
+      savedInvoices.map((invoice) => invoice.details?.invoiceNumber)
+    );
+    return {
+      exists,
+      suggestedNumber: peekNextInvoiceNumber(),
+    };
+  };
+
+  /**
+   * Persists invoice data after duplicate checks have passed.
+   */
+  const persistInvoice = async (formValues: InvoiceType) => {
+    const invoiceNumber = formValues.details.invoiceNumber;
+
+    if (user) {
+      try {
+        const response = await fetch("/api/invoice/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(formValues),
+        });
+
+        if (response.ok) {
           const existingInvoiceIndex = savedInvoices.findIndex(
-            (invoice: InvoiceType) => {
-              return (
-                invoice.details.invoiceNumber === formValues.details.invoiceNumber
-              );
-            }
+            (invoice: InvoiceType) =>
+              invoice.details.invoiceNumber === invoiceNumber
           );
 
-          // If invoice already exists
           if (existingInvoiceIndex !== -1) {
-            savedInvoices[existingInvoiceIndex] = formValues;
+            const updated = [...savedInvoices];
+            updated[existingInvoiceIndex] = formValues;
+            setSavedInvoices(updated);
             modifiedInvoiceSuccess();
           } else {
-            // Add the form values to the array
-            savedInvoices.push(formValues);
+            setSavedInvoices([...savedInvoices, formValues]);
             saveInvoiceSuccess();
           }
 
-          localStorage.setItem("savedInvoices", JSON.stringify(savedInvoices));
-          setSavedInvoices(savedInvoices);
+          updateLastInvoiceNumber(invoiceNumber);
+          setEditingInvoiceNumber(invoiceNumber);
+        } else {
+          const error = await response.json();
+          console.error("Save error:", error);
+          toast({
+            variant: "destructive",
+            title: "Save failed",
+            description: error.error || "Could not save invoice",
+          });
         }
+      } catch (error) {
+        console.error("Save error:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to save invoice. Please try again.",
+        });
+      }
+      return;
+    }
+
+    // Save to localStorage
+    let localSavedInvoices: InvoiceType[] = [];
+    try {
+      const savedInvoicesJSON = localStorage.getItem("savedInvoices");
+      localSavedInvoices = savedInvoicesJSON
+        ? JSON.parse(savedInvoicesJSON)
+        : [];
+    } catch (error) {
+      console.error("Error parsing saved invoices from localStorage:", error);
+      localStorage.removeItem("savedInvoices");
+      localSavedInvoices = [];
+    }
+
+    const existingInvoiceIndex = localSavedInvoices.findIndex(
+      (invoice: InvoiceType) =>
+        invoice.details.invoiceNumber === invoiceNumber
+    );
+
+    if (existingInvoiceIndex !== -1) {
+      localSavedInvoices[existingInvoiceIndex] = formValues;
+      modifiedInvoiceSuccess();
+    } else {
+      localSavedInvoices.push(formValues);
+      saveInvoiceSuccess();
+    }
+
+    localStorage.setItem("savedInvoices", JSON.stringify(localSavedInvoices));
+    setSavedInvoices(localSavedInvoices);
+    updateLastInvoiceNumber(invoiceNumber);
+    setEditingInvoiceNumber(invoiceNumber);
+  };
+
+  // TODO: Change function name. (saveInvoiceData maybe?)
+  /**
+   * Saves the invoice data to database (if logged in) or local storage.
+   * If the invoice number already exists (and we're not editing that invoice),
+   * prompts the user to use the next available number instead.
+   */
+  const saveInvoice = async () => {
+    if (!invoicePdf || !getValues) return;
+
+    const formValues = withDefaultBrandAssets(getValues());
+    const updatedDate = new Date().toLocaleDateString(
+      "en-US",
+      SHORT_DATE_OPTIONS
+    );
+    formValues.details.updatedAt = updatedDate;
+
+    const invoiceNumber = formValues.details.invoiceNumber?.trim();
+    if (!invoiceNumber) {
+      toast({
+        variant: "destructive",
+        title: "Missing invoice number",
+        description: "Please enter an invoice number before saving.",
+      });
+      return;
+    }
+
+    // Allow update when editing the same invoice number; otherwise warn on conflict
+    const isEditingSameNumber =
+      editingInvoiceNumber !== null &&
+      editingInvoiceNumber === invoiceNumber;
+
+    if (!isEditingSameNumber) {
+      const { exists, suggestedNumber } =
+        await resolveInvoiceNumberConflict(invoiceNumber);
+
+      if (exists) {
+        setDuplicateDialog({
+          open: true,
+          existingNumber: invoiceNumber,
+          suggestedNumber,
+        });
+        return;
       }
     }
+
+    await persistInvoice(formValues);
+  };
+
+  const handleUseSuggestedInvoiceNumber = async () => {
+    const suggested = duplicateDialog.suggestedNumber;
+    setDuplicateDialog((prev) => ({ ...prev, open: false }));
+    if (!suggested) return;
+
+    setValue("details.invoiceNumber", suggested);
+    setEditingInvoiceNumber(null);
+
+    if (!invoicePdf || !getValues) return;
+
+    const formValues = withDefaultBrandAssets(getValues());
+    formValues.details.invoiceNumber = suggested;
+    formValues.details.updatedAt = new Date().toLocaleDateString(
+      "en-US",
+      SHORT_DATE_OPTIONS
+    );
+    await persistInvoice(formValues);
   };
 
   // TODO: Change function name. (deleteInvoiceData maybe?)
@@ -934,9 +1124,19 @@ export const InvoiceContextProvider = ({
         sendPdfToMail,
         exportInvoiceAs,
         importInvoice,
+        markInvoiceAsEditing: setEditingInvoiceNumber,
       }}
     >
       {children}
+      <DuplicateInvoiceNumberAlert
+        open={duplicateDialog.open}
+        existingNumber={duplicateDialog.existingNumber}
+        suggestedNumber={duplicateDialog.suggestedNumber}
+        onOpenChange={(open) =>
+          setDuplicateDialog((prev) => ({ ...prev, open }))
+        }
+        onUseSuggested={handleUseSuggestedInvoiceNumber}
+      />
     </InvoiceContext.Provider>
   );
 };

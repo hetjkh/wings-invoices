@@ -104,6 +104,7 @@ const SavedInvoicesList = ({ onInvoiceLoaded }: SavedInvoicesListProps) => {
         invoiceListStats,
         reloadInvoiceList,
         loadMoreInvoices,
+        markInvoiceAsEditing,
     } = useInvoiceContext();
     const skipFilterReloadRef = useRef(true);
     const [searchQuery, setSearchQuery] = useState("");
@@ -190,6 +191,7 @@ const SavedInvoicesList = ({ onInvoiceLoaded }: SavedInvoicesListProps) => {
                 // Reset form with the prepared copy
                 // Note: Dates are already converted to Date objects by updateFields
                 reset(invoiceCopy);
+                markInvoiceAsEditing(invoiceCopy.details?.invoiceNumber || null);
             } finally {
                 setLoadingInvoiceId(null);
             }

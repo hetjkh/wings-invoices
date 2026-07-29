@@ -32,7 +32,7 @@ import {
 } from "@/lib/variables";
 
 // Helpers
-import { getCurrentInvoiceNumber, getNextInvoiceNumber } from "@/lib/helpers";
+import { peekNextInvoiceNumber } from "@/lib/helpers";
 
 // Helpers
 const readDraftFromLocalStorage = (): InvoiceType | null => {
@@ -90,17 +90,16 @@ const Providers = ({ children }: ProvidersProps) => {
           ...draft.details,
           invoiceLogo: DEFAULT_INVOICE_LOGO,
           signature: { data: DEFAULT_INVOICE_SIGNATURE },
-          // Auto-generate invoice number if empty (use current number, don't increment)
+          // Auto-generate next invoice number if empty
           invoiceNumber: (draft.details?.invoiceNumber && draft.details.invoiceNumber.trim() !== "")
             ? draft.details.invoiceNumber
-            : getCurrentInvoiceNumber(),
+            : peekNextInvoiceNumber(),
         },
       };
       form.reset(mergedDraft, { keepDefaultValues: false });
     } else {
-      // If no draft, set the invoice number for a new invoice (use current number, don't increment)
-      const currentInvoiceNumber = getCurrentInvoiceNumber();
-      form.setValue("details.invoiceNumber", currentInvoiceNumber);
+      // New invoice: use the next number after the last saved invoice
+      form.setValue("details.invoiceNumber", peekNextInvoiceNumber());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

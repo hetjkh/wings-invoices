@@ -201,57 +201,121 @@ const isImageUrl = (str: string) => {
 };
 
 /**
- * Gets the current invoice number without incrementing
- * @returns {string} The current invoice number as a string (returns "1" if none exists)
+ * Parses a numeric value from an invoice number string.
+ * Supports plain numbers ("12") and trailing digits ("INV00012").
  */
-const getCurrentInvoiceNumber = (): string => {
-    if (typeof window === "undefined") return "1";
-    
+const parseInvoiceNumberValue = (invoiceNumber: string | undefined | null): number | null => {
+    if (!invoiceNumber || typeof invoiceNumber !== "string") return null;
+    const trimmed = invoiceNumber.trim();
+    if (!trimmed) return null;
+
+    const asInt = parseInt(trimmed, 10);
+    if (!Number.isNaN(asInt) && String(asInt) === trimmed) {
+        return asInt;
+    }
+
+    const trailingDigits = trimmed.match(/(\d+)$/);
+    if (trailingDigits) {
+        const value = parseInt(trailingDigits[1], 10);
+        return Number.isNaN(value) ? null : value;
+    }
+
+    return null;
+};
+
+/**
+ * Returns the highest numeric invoice number from a list of invoice number strings.
+ */
+const getMaxInvoiceNumberValue = (invoiceNumbers: Array<string | undefined | null>): number => {
+    let max = 0;
+    for (const invoiceNumber of invoiceNumbers) {
+        const value = parseInvoiceNumberValue(invoiceNumber);
+        if (value !== null && value > max) {
+            max = value;
+        }
+    }
+    return max;
+};
+
+/**
+ * Reads the last used invoice number from localStorage (0 if none).
+ */
+const getLastInvoiceNumberValue = (): number => {
+    if (typeof window === "undefined") return 0;
+
     try {
         const lastNumberStr = window.localStorage.getItem(LOCAL_STORAGE_LAST_INVOICE_NUMBER_KEY);
-        if (!lastNumberStr) {
-            // If no number exists, return "1" for the first invoice
-            return "1";
-        }
+        if (!lastNumberStr) return 0;
         const lastNumber = parseInt(lastNumberStr, 10);
-        // Return the last number (which is the current highest invoice number)
-        return lastNumber.toString();
+        return Number.isNaN(lastNumber) ? 0 : lastNumber;
     } catch {
-        return "1";
+        return 0;
     }
 };
 
 /**
- * Gets the next invoice number and increments the counter
+ * Updates the last used invoice number if the provided value is higher.
+ */
+const updateLastInvoiceNumber = (invoiceNumber: string | number): void => {
+    if (typeof window === "undefined") return;
+
+    try {
+        const value =
+            typeof invoiceNumber === "number"
+                ? invoiceNumber
+                : parseInvoiceNumberValue(invoiceNumber);
+
+        if (value === null || value <= 0) return;
+
+        const current = getLastInvoiceNumberValue();
+        if (value > current) {
+            window.localStorage.setItem(
+                LOCAL_STORAGE_LAST_INVOICE_NUMBER_KEY,
+                value.toString()
+            );
+        }
+    } catch {
+        // Ignore localStorage errors
+    }
+};
+
+/**
+ * Syncs the last invoice number counter from a list of known invoice numbers.
+ */
+const syncLastInvoiceNumberFromList = (
+    invoiceNumbers: Array<string | undefined | null>
+): void => {
+    const max = getMaxInvoiceNumberValue(invoiceNumbers);
+    if (max > 0) {
+        updateLastInvoiceNumber(max);
+    }
+};
+
+/**
+ * Gets the current (last used) invoice number without incrementing.
+ * @returns {string} The current invoice number as a string (returns "1" if none exists)
+ */
+const getCurrentInvoiceNumber = (): string => {
+    const lastNumber = getLastInvoiceNumberValue();
+    return lastNumber > 0 ? lastNumber.toString() : "1";
+};
+
+/**
+ * Peeks the next invoice number without writing to localStorage.
+ * Use this when filling a new invoice form; commit on successful save.
+ */
+const peekNextInvoiceNumber = (): string => {
+    const lastNumber = getLastInvoiceNumberValue();
+    return (lastNumber + 1).toString();
+};
+
+/**
+ * Gets the next invoice number for a new invoice form.
+ * Does not advance the counter until the invoice is saved (via updateLastInvoiceNumber).
  * @returns {string} The next invoice number as a string
  */
 const getNextInvoiceNumber = (): string => {
-    if (typeof window === "undefined") return "1";
-    
-    try {
-        const lastNumberStr = window.localStorage.getItem(LOCAL_STORAGE_LAST_INVOICE_NUMBER_KEY);
-        let nextNumber: number;
-        
-        if (!lastNumberStr) {
-            // If no number exists, start with 1
-            nextNumber = 1;
-        } else {
-            // Increment from the last number
-            const lastNumber = parseInt(lastNumberStr, 10);
-            nextNumber = lastNumber + 1;
-        }
-        
-        // Save the new number
-        window.localStorage.setItem(LOCAL_STORAGE_LAST_INVOICE_NUMBER_KEY, nextNumber.toString());
-        
-        return nextNumber.toString();
-    } catch {
-        // If there's an error, set it to 1 and return it
-        if (typeof window !== "undefined") {
-            window.localStorage.setItem(LOCAL_STORAGE_LAST_INVOICE_NUMBER_KEY, "1");
-        }
-        return "1";
-    }
+    return peekNextInvoiceNumber();
 };
 
 /**
@@ -389,7 +453,12 @@ export {
     isValidEmail,
     isDataUrl,
     isImageUrl,
+    parseInvoiceNumberValue,
+    getMaxInvoiceNumberValue,
+    updateLastInvoiceNumber,
+    syncLastInvoiceNumberFromList,
     getCurrentInvoiceNumber,
+    peekNextInvoiceNumber,
     getNextInvoiceNumber,
     getInvoiceTemplate,
     fileToBuffer,
