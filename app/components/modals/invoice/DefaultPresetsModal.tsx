@@ -30,6 +30,9 @@ import { Save, Trash2, Loader2, FolderOpen } from "lucide-react";
 // Types
 import { InvoiceType } from "@/types";
 
+// Helpers
+import { peekNextInvoiceNumber } from "@/lib/helpers";
+
 interface Preset {
     id: string;
     name: string;
@@ -158,12 +161,19 @@ const DefaultPresetsModal = () => {
                     delete detailsWithDates.dueDate;
                 }
 
+                // Keep the current auto-generated invoice number — presets should not overwrite it
+                const currentInvoiceNumber =
+                    getValues("details.invoiceNumber")?.trim() ||
+                    peekNextInvoiceNumber();
+
                 // Merge preset with form defaults, ensuring items are from FORM_DEFAULT_VALUES
                 const mergedPreset: InvoiceType = {
                     sender: preset.sender,
                     receiver: preset.receiver,
                     details: {
                         ...detailsWithDates,
+                        // Never apply the preset's saved invoice number
+                        invoiceNumber: currentInvoiceNumber,
                         items: [
                             {
                                 name: "",
